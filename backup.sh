@@ -3,9 +3,10 @@
 # Налаштування
 LOCAL_DIR="$HOME/data"
 REMOTE_USER="vagrant"
-REMOTE_HOST="192.168.56.10"
+REMOTE_HOST="192.168.56.11"
 REMOTE_DIR="/home/vagrant/backup"
 SSH_KEY="/home/vagrant/private_key"  # Шлях до приватного ключа
+LOCAL_BACKUP_DIR="$HOME/backup_copy"  # Локальна копія резервних файлів
 
 # Лог-файл
 LOG_FILE="$HOME/backup.log"
@@ -18,6 +19,9 @@ if [ ! -d "$LOCAL_DIR" ]; then
     echo "$(date '+%Y-%m-%d %H:%M:%S') ❌ Локальний каталог $LOCAL_DIR не існує!" | tee -a "$LOG_FILE"
     mkdir -p "$LOCAL_DIR"
 fi
+
+# Перевірка наявності локальної папки для копій
+mkdir -p "$LOCAL_BACKUP_DIR"
 
 # Перевірка доступності сервера
 ping -c 2 $REMOTE_HOST > /dev/null
@@ -44,10 +48,22 @@ else
     exit 1
 fi
 
-# Видалення старих резервних копій (залишаємо лише 3 останніх)
-ssh -i "$SSH_KEY" "$REMOTE_USER@$REMOTE_HOST" "cd $REMOTE_DIR && ls -t | tail -n +4 | xargs rm -f"
+# Завантаження архіву назад на локальну машину
+scp -i "$SSH_KEY" "$REMOTE_USER@$REMOTE_HOST:$REMOTE_DIR/$ARCHIVE_NAME" "$LOCAL_BACKUP_DIR"
 
-# Видалення локального архіву
+if [ $? -eq 0 ]; then
+    echo "$(date '+%Y-%m-%d %H:%M:%S') ✅ Копія збережена локально у $LOCAL_BACKUP_DIR" | tee -a "$LOG_FILE"
+else
+    echo "$(date '+%Y-%m-%d %H:%M:%S') ❌ Помилка при копіюванні архіву назад!" | tee -a "$LOG_FILE"
+fi
+
+# Видалення старих резервних копій на сервері (залишаємо лише 3 останніх)
+ssh -i "$SSH_KEY" "$REMOTE_USER@$REMOTE_HOST" "cd $REMOTE_DIR && ls -tp | grep -v '/$' | sed -n '4,\$p' | xargs -r rm --"
+
+# Видалення старих локальних копій (залишаємо лише 3 останніх)
+ls -tp "$LOCAL_BACKUP_DIR" | grep -v '/$' | sed -n '4,$p' | xargs -I {} rm -f "$LOCAL_BACKUP_DIR/{}"
+
+# Видалення тимчасового файлу
 rm "/tmp/$ARCHIVE_NAME"
 
 exit 0
